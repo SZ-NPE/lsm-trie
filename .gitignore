@@ -1,0 +1,15 @@
+
+# vscode
+.vscode/
+
+# bin
+bloom_test
+cm_util
+cmap_test
+generator_test
+io_util
+mixed_test
+rwlock_test
+seqio_util
+staged_read
+table_test

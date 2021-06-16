@@ -1159,20 +1159,25 @@ db_multi_insert(struct DB * const db, const uint64_t nr_items, const struct KeyV
 {
   uint64_t i = 0;
   while (i < nr_items) {
+    // 获取对应的写锁
     const uint64_t ticket = rwlock_writer_lock(&(db->rwlock));
     struct Table *at = db->active_table[0];
     while (i < nr_items) {
       const struct KeyValue * const kv = &(kvs[i]);
       const bool ri = table_insert_kv_safe(at, kv);
+      // 写入失败，可能因为内存组件满，无 active table 此时阻塞住了客户端写入
       if (ri == true) { i++; } else { break; }
     }
     rwlock_writer_unlock(&(db->rwlock), ticket);
 
+    // 发起相应的重试
     if (i < nr_items) {
       db_wait_active_table(db);
       stat_inc(&(db->stat.nr_set_retry));
     }
   }
+
+  // 最终统计上添加此次批量插入的 KV 数目
   stat_inc_n(&(db->stat.nr_set), nr_items);
   return true;
 }
@@ -1290,9 +1295,13 @@ db_spawn_threads(struct DB * const db)
 {
   assert(db);
   // spawn compaction thread
+  // 初始化线程属性
   pthread_attr_t attr;
   pthread_attr_init(&attr);
+  // 设置线程的分离属性为 PTHREAD_CREATE_JOINABLE
   pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+
+  // 创建 Compaction 线程，并传入 db，并设置对应的线程 name
   for (uint64_t n = 0; n < DB_COMPACTION_THREADS_NR; n++) {
     const int pc = pthread_create(&(db->t_compaction[n]), &attr, thread_compaction, (void *)db);
     assert(pc == 0);
@@ -1301,10 +1310,12 @@ db_spawn_threads(struct DB * const db)
     pthread_setname_np(db->t_compaction[n], th_name);
   }
 
+  // 创建 active_dumper 线程，并传入 db，并设置对应的线程 name
   const int pca = pthread_create(&(db->t_active_dumper), &attr, thread_active_dumper, (void *)db);
   assert(pca == 0);
   pthread_setname_np(db->t_active_dumper, "Active-Dumper");
 
+  // 创建 meta_dumper 线程，并传入 db，并设置对应的线程 name
   const int pcm = pthread_create(&(db->t_meta_dumper), &attr, thread_meta_dumper, (void *)db);
   assert(pcm == 0);
   pthread_setname_np(db->t_meta_dumper, "Meta-Dumper");
@@ -1358,6 +1369,7 @@ db_load_cm_conf(const char * const fn)
   struct DB *
 db_touch(const char * const meta_dir, const char * const cm_conf_fn)
 {
+  // 读取元数据目录和配置文件
   // cm conf
   assert(cm_conf_fn);
   // TODO: free cm_conf at later time
@@ -1367,14 +1379,20 @@ db_touch(const char * const meta_dir, const char * const cm_conf_fn)
   assert(meta_dir);
   const int r_dir = access(meta_dir, F_OK);
   struct DB * db = NULL;
+
+  // 判断元数据文件夹中是否已有数据来决定是否加载以前的 DB
   if (r_dir == 0) {// has dir
     // try load DB
     db = db_load(meta_dir, cm_conf);
   }
+
+  // 创建新 DB
   // create anyway
   if (db == NULL) {
     db = db_create(meta_dir, cm_conf);
   }
+
+  // 为 DB 分配相应的线程
   if (db) {
     db_spawn_threads(db);
   }

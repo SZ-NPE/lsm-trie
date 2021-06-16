@@ -1,5 +1,5 @@
-/dev/sdb
-0  --auto-detect the device capacity
+/home/shunzi/data/test_data_0
+10  --auto-detect the device capacity
 $  --end-of-dev
 0  --bloom-container
 0  --l-0
